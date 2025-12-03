@@ -788,10 +788,6 @@ def plot_interactive(
     handles, labels = ax.get_legend_handles_labels()
     ax.legend(handles, labels, loc="best")
 
-    # Enable mirrored ticks on right-hand side for easier readings
-    ax.yaxis.set_ticks_position("both")
-    ax.tick_params(axis="y", labelright=True, right=True)
-
     # Stats box (fixed in axes coords)
     def build_stats_lines(kcal_val, kcal_sigma_val):
         lines: List[str] = []
