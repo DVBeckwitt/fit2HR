@@ -1,7 +1,6 @@
 # hr-energy-lab
 
-Research-grade toolkit for estimating exercise energy expenditure from heart rate data, with explicit uncertainty propagation, `.fit` parsing, and interactive HR/zone analysis.
-
+I use Strava and wanted a more accurate way to view my HR data and precise calorie burned number. This is written to do that with interactivity and error propogation.
 ---
 
 ## What this does
@@ -13,7 +12,6 @@ Research-grade toolkit for estimating exercise energy expenditure from heart rat
 * Computes time in HR zones and overlays zones on the plot
 * Provides an interactive HR plot with hover tooltips and zoom, plus a console summary and CSV export
 
-Counterpoint: it is a single user script, not a full training platform. It will not sync with cloud services or manage long term training load unless you build that around it.
 
 ---
 
@@ -58,7 +56,6 @@ Function: `compute_smoothed_auto(minutes, hr_vals, target_durations_min=None)`
 * For each candidate `w`, it minimizes the mean squared error between each point and the mean of its neighbors (LOOCV).
 * Returns the smoothed HR, per-sample local standard deviation, chosen window, and effective duration.
 
-Counterpoint: moving average plus LOOCV is simple and robust but not physiologically explicit.
 
 ### HR zones
 
@@ -86,7 +83,6 @@ You can define zones in `profile.yaml` in two ways:
 
 If no zones are specified but `hr_rest` and `hr_max` are known, a default 5-zone HRR scheme is used.
 
-Counterpoint: HR zones are a simple abstraction and will not capture every athlete's needs.
 
 ### Calorie estimation and uncertainty
 
@@ -102,7 +98,6 @@ The console prints something like:
 Calories (strict propagation + floor): E = 650 ± 40 kcal (hr_error_bpm=3.0)
 ```
 
-Counterpoint: the ±σ reflects HR noise, not full model error against indirect calorimetry.
 
 ### Interactive plotting
 
