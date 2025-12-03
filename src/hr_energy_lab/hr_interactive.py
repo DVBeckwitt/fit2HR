@@ -1164,7 +1164,7 @@ def plot_interactive(
     ax.callbacks.connect("xlim_changed", lambda ax: update_zone_labels())
 
     # --- Profile controls under the plot ---
-    controls_ax.set_title("Quick profile tweaks (updates this session only)")
+    controls_ax.set_title("Profile")
 
     field_specs = [
         ("Name", "name", True, str),
@@ -1426,30 +1426,56 @@ def plot_interactive(
         visible=False,
         zorder=10,
     )
-    last_tip_ax: Optional[Any] = None
+    active_tip_ax: Optional[Any] = None
+
+    def update_tooltip_position(event):
+        fig_x, fig_y = fig.transFigure.inverted().transform((event.x, event.y))
+        fig_x = min(max(fig_x + 0.01, 0.0), 0.98)
+        fig_y = min(max(fig_y + 0.01, 0.0), 0.98)
+        tooltip.set_position((fig_x, fig_y))
+
+    def show_tooltip(ax_obj, event):
+        message = tooltip_texts.get(ax_obj)
+        if message is None:
+            return
+        if event.x is None or event.y is None:
+            return
+        update_tooltip_position(event)
+        tooltip.set_text(message)
+        tooltip.set_visible(True)
 
     def on_motion(event):
-        nonlocal last_tip_ax
+        nonlocal active_tip_ax
         ax_under = event.inaxes
         if ax_under in tooltip_texts:
-            fig_x, fig_y = fig.transFigure.inverted().transform((event.x, event.y))
-            fig_x = min(max(fig_x + 0.01, 0.0), 0.98)
-            fig_y = min(max(fig_y + 0.01, 0.0), 0.98)
-            tooltip.set_position((fig_x, fig_y))
-            new_text = tooltip_texts[ax_under]
-            if not tooltip.get_visible() or new_text != tooltip.get_text() or ax_under != last_tip_ax:
-                tooltip.set_text(new_text)
-                tooltip.set_visible(True)
-                last_tip_ax = ax_under
-                fig.canvas.draw_idle()
-            else:
-                fig.canvas.draw_idle()
-        elif tooltip.get_visible():
+            if event.x is None or event.y is None:
+                return
+            active_tip_ax = ax_under
+            show_tooltip(ax_under, event)
+            fig.canvas.draw_idle()
+        elif active_tip_ax is not None:
             tooltip.set_visible(False)
-            last_tip_ax = None
+            active_tip_ax = None
+            fig.canvas.draw_idle()
+
+    def on_axes_enter(event):
+        nonlocal active_tip_ax
+        ax_under = event.inaxes
+        if ax_under in tooltip_texts and event.x is not None and event.y is not None:
+            active_tip_ax = ax_under
+            show_tooltip(ax_under, event)
+            fig.canvas.draw_idle()
+
+    def on_axes_leave(event):
+        nonlocal active_tip_ax
+        if active_tip_ax is not None:
+            tooltip.set_visible(False)
+            active_tip_ax = None
             fig.canvas.draw_idle()
 
     fig.canvas.mpl_connect("motion_notify_event", on_motion)
+    fig.canvas.mpl_connect("axes_enter_event", on_axes_enter)
+    fig.canvas.mpl_connect("axes_leave_event", on_axes_leave)
 
     plt.show()
 
