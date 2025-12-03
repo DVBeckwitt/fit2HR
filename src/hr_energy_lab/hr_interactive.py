@@ -3,12 +3,12 @@
 #   pip install numpy fitparse matplotlib pyyaml
 #
 # Usage:
-#   - Put this script and profile.yaml in the same folder as your .fit files,
-#     or be ready to point the script at the folder containing them.
+#   - Put this script and profile.yaml in the folder you want to use for .fit
+#     files (or set that folder once in the GUI).
 #   - Run: python hr_interactive.py
-#   - It will ask which folder to scan, list the newest .fit files (count from
-#     YAML), ask which to load, copy (minute,HR) CSV to clipboard, and open an
-#     interactive plot.
+#   - It will load your default .fit folder (or prompt once to set one if empty),
+#     list the newest .fit files (count from YAML), ask which to load, copy
+#     (minute,HR) CSV to clipboard, and open an interactive plot.
 
 from pathlib import Path
 import copy
@@ -17,6 +17,8 @@ from typing import Optional, Tuple, List, Dict, Any
 import subprocess
 import bisect
 import statistics as stats
+import tkinter as tk
+from tkinter import filedialog
 
 import numpy as np
 import fitparse
@@ -127,6 +129,70 @@ def prompt_fit_directory(default_dir: Optional[Path] = None) -> Path:
             return candidate
 
         print("Directory does not exist. Please enter a valid folder path.")
+
+
+def select_directory_with_dialog(initial_dir: Path) -> Optional[Path]:
+    """Open a native folder chooser; return None if cancelled or unavailable."""
+
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        selected = filedialog.askdirectory(initialdir=str(initial_dir))
+        root.destroy()
+        if selected:
+            return Path(selected).expanduser()
+    except Exception:
+        return None
+    return None
+
+
+def has_fit_files(path: Path) -> bool:
+    """Return True if the directory contains at least one .fit file."""
+
+    return any(path.glob("*.fit"))
+
+
+def ensure_fit_directory(
+    profile: Dict[str, Any],
+    profile_yaml_data: Dict[str, Any],
+    profile_path: Path,
+    fallback_dir: Path,
+) -> Tuple[Path, Dict[str, Any], Dict[str, Any]]:
+    """
+    Return a valid FIT directory, prompting with a file manager if needed.
+
+    If the resolved default folder has no .fit files, the user is asked to pick
+    a replacement before the GUI opens. The chosen folder becomes the in-memory
+    default and is written back to profile.yaml.
+    """
+
+    current_default = profile.get("default_fit_dir")
+    fit_dir = Path(current_default).expanduser() if current_default else fallback_dir
+
+    if not fit_dir.exists():
+        fit_dir = fallback_dir
+
+    if has_fit_files(fit_dir):
+        return fit_dir, profile, profile_yaml_data
+
+    print(
+        f"No .fit files found in {fit_dir}. "
+        "Choose a folder to set as the default FIT directory."
+    )
+
+    chosen = select_directory_with_dialog(fit_dir)
+    if chosen is None:
+        chosen = prompt_fit_directory(fit_dir)
+
+    if not has_fit_files(chosen):
+        raise FileNotFoundError(
+            f"Selected directory {chosen} does not contain any .fit files."
+        )
+
+    profile["default_fit_dir"] = str(chosen)
+    saved_yaml = save_profile_to_yaml(profile, profile_path, profile_yaml_data)
+    return chosen, profile, saved_yaml
 
 
 def copy_csv_to_clipboard(minutes, hr_vals):
@@ -316,6 +382,10 @@ def load_profile_from_yaml(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     # Script-level UI config
     script_cfg = data.get("script", {}) or {}
     recent_fit_files = int(script_cfg.get("recent_fit_files", 5))
+    default_fit_dir_raw = script_cfg.get("default_fit_dir")
+    default_fit_dir = None
+    if isinstance(default_fit_dir_raw, str) and default_fit_dir_raw.strip():
+        default_fit_dir = str(Path(default_fit_dir_raw).expanduser())
 
     print(
         "Loaded profile from YAML: "
@@ -339,6 +409,7 @@ def load_profile_from_yaml(path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         "calories_model_frac": model_frac,
         "calories_include_model_uncertainty": include_model_unc,
         "recent_fit_files": recent_fit_files,
+        "default_fit_dir": default_fit_dir,
     }
     return profile, data
 
@@ -364,6 +435,7 @@ def prompt_user_profile_fallback() -> Dict[str, Any]:
         "calories_model_frac": 0.2,
         "calories_include_model_uncertainty": True,
         "recent_fit_files": 5,
+        "default_fit_dir": None,
     }
     return profile
 
@@ -404,6 +476,14 @@ def build_profile_yaml(profile_state: Dict[str, Any], base_yaml: Dict[str, Any])
         profile_state.get("calories_include_model_uncertainty", True)
     )
     data["calories"] = cal_cfg
+
+    script_cfg = data.get("script", {}) or {}
+    if profile_state.get("recent_fit_files") is not None:
+        script_cfg["recent_fit_files"] = int(profile_state.get("recent_fit_files", 5))
+    fit_dir_val = profile_state.get("default_fit_dir")
+    if fit_dir_val:
+        script_cfg["default_fit_dir"] = str(fit_dir_val)
+    data["script"] = script_cfg
 
     return data
 
@@ -1079,6 +1159,25 @@ def plot_interactive(
     # --- Profile controls under the plot ---
     controls_ax.set_title("Quick profile tweaks (updates this session only)")
 
+    fit_dir_display = controls_ax.text(
+        0.02,
+        0.98,
+        "",
+        fontsize=9,
+        ha="left",
+        va="top",
+    )
+
+    def update_fit_dir_display(dir_value: Optional[str]):
+        label = dir_value if dir_value else "(not set)"
+        fit_dir_display.set_text(f"FIT folder: {label}")
+
+    update_fit_dir_display(profile_state.get("default_fit_dir"))
+
+    browse_ax = controls_ax.inset_axes([0.68, 0.9, 0.28, 0.08])
+    browse_button = Button(browse_ax, "Pick FIT folder")
+    browse_button.label.set_fontsize(9)
+
     field_specs = [
         ("Name", "name", True, str),
         ("Sex (M/F)", "sex", False, lambda v: str(v).strip().upper()),
@@ -1125,6 +1224,20 @@ def plot_interactive(
         txt.set_fontsize(9)
 
     status_text = controls_ax.text(0.02, 0.05, "", fontsize=9)
+
+    def on_pick_fit_folder(event=None):
+        start_dir_raw = profile_state.get("default_fit_dir")
+        start_dir = Path(start_dir_raw).expanduser() if start_dir_raw else Path.cwd()
+        chosen_dir = select_directory_with_dialog(start_dir)
+        if chosen_dir is None:
+            status_text.set_text("Folder picker was cancelled.")
+        else:
+            profile_state["default_fit_dir"] = str(chosen_dir)
+            update_fit_dir_display(profile_state["default_fit_dir"])
+            status_text.set_text(f"Default FIT folder set to {chosen_dir}")
+        fig.canvas.draw_idle()
+
+    browse_button.on_clicked(on_pick_fit_folder)
 
     def parse_field(text: str, allow_none: bool, caster):
         cleaned = text.strip()
@@ -1219,6 +1332,7 @@ def plot_interactive(
         current_unc = include_unc_checkbox.get_status()[0]
         if desired_unc != current_unc:
             include_unc_checkbox.set_active(0)
+        update_fit_dir_display(profile_state.get("default_fit_dir"))
         apply_profile_changes(profile_state)
         status_text.set_text("Reset to YAML values for this session.")
 
@@ -1245,10 +1359,17 @@ def plot_interactive(
 # ---------------------------------------------------------------------
 
 def main():
-    default_dir = Path.cwd()
-    fit_dir = prompt_fit_directory(default_dir)
-    profile_path = fit_dir / "profile.yaml"
+    profile_path = Path.cwd() / "profile.yaml"
     profile, profile_yaml_data = get_profile(profile_path)
+
+    fallback_dir = Path.cwd()
+    fit_dir, profile, profile_yaml_data = ensure_fit_directory(
+        profile,
+        profile_yaml_data,
+        profile_path,
+        fallback_dir,
+    )
+
     fit_path = choose_fit_in_folder(
         fit_dir,
         max_files=profile.get("recent_fit_files", 5),
