@@ -15,6 +15,7 @@ import copy
 from datetime import datetime
 from typing import Optional, Tuple, List, Dict, Any
 import subprocess
+import time
 import bisect
 import statistics as stats
 import tkinter as tk
@@ -1030,9 +1031,11 @@ def plot_interactive(
         annot.set_visible(True)
 
     last_hover_idx: Optional[int] = None
+    last_hover_draw = 0.0
+    hover_min_interval = 1.0 / 60.0
 
     def on_move(event):
-        nonlocal last_hover_idx
+        nonlocal last_hover_idx, last_hover_draw
         if event.inaxes is not ax:
             if annot.get_visible():
                 annot.set_visible(False)
@@ -1048,7 +1051,12 @@ def plot_interactive(
         if last_hover_idx == idx and annot.get_visible():
             return
 
+        now = time.perf_counter()
+        if now - last_hover_draw < hover_min_interval:
+            return
+
         last_hover_idx = idx
+        last_hover_draw = now
         update_annotation(idx)
         fig.canvas.draw_idle()
 
