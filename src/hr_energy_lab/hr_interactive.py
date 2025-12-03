@@ -19,6 +19,7 @@ import bisect
 import statistics as stats
 import tkinter as tk
 from tkinter import filedialog
+import sys
 
 import numpy as np
 import fitparse
@@ -1151,6 +1152,12 @@ def plot_interactive(
 
     fig.canvas.mpl_connect("button_press_event", on_click)
     fig.canvas.mpl_connect("scroll_event", on_scroll)
+
+    def on_close(event):
+        plt.close("all")
+        sys.exit(0)
+
+    fig.canvas.mpl_connect("close_event", on_close)
 
     # Also update zone labels if toolbar zoom/pan changes limits
     ax.callbacks.connect("ylim_changed", lambda ax: update_zone_labels())
