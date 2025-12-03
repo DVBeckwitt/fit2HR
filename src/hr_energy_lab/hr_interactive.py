@@ -957,7 +957,6 @@ def plot_interactive(
             for line, text in zip(zone_line_artists, zone_text_artists):
                 line.set_visible(False)
                 text.set_visible(False)
-            fig.canvas.draw_idle()
             return
 
         y_min, y_max = ax.get_ylim()
@@ -1005,7 +1004,7 @@ def plot_interactive(
             text.set_text(label)
             text.set_visible(True)
 
-        fig.canvas.draw_idle()
+        return
 
     update_zone_labels(force=True)
 
@@ -1061,8 +1060,10 @@ def plot_interactive(
         x2, y2 = erelease.xdata, erelease.ydata
         if None in (x1, y1, x2, y2):
             return
-        ax.set_xlim(min(x1, x2), max(x1, x2))
-        ax.set_ylim(min(y1, y2), max(y1, y2))
+        ax.set_xlim(min(x1, x2), max(x1, x2), emit=False)
+        ax.set_ylim(min(y1, y2), max(y1, y2), emit=False)
+        update_zone_labels()
+        fig.canvas.draw_idle()
 
     RectangleSelector(
         ax,
@@ -1103,8 +1104,10 @@ def plot_interactive(
                 y_center + span_y / 2,
             )
 
-            ax.set_xlim(new_xmin, new_xmax)
-            ax.set_ylim(new_ymin, new_ymax)
+            ax.set_xlim(new_xmin, new_xmax, emit=False)
+            ax.set_ylim(new_ymin, new_ymax, emit=False)
+            update_zone_labels()
+            fig.canvas.draw_idle()
 
         elif event.button == 3:
             # Zoom out by factor 2 around click
@@ -1123,8 +1126,10 @@ def plot_interactive(
                 y_center + span_y / 2,
             )
 
-            ax.set_xlim(new_xmin, new_xmax)
-            ax.set_ylim(new_ymin, new_ymax)
+            ax.set_xlim(new_xmin, new_xmax, emit=False)
+            ax.set_ylim(new_ymin, new_ymax, emit=False)
+            update_zone_labels()
+            fig.canvas.draw_idle()
 
     def on_scroll(event):
         if event.inaxes is not ax:
@@ -1147,8 +1152,10 @@ def plot_interactive(
             y_center + span_y / 2,
         )
 
-        ax.set_xlim(new_xmin, new_xmax)
-        ax.set_ylim(new_ymin, new_ymax)
+        ax.set_xlim(new_xmin, new_xmax, emit=False)
+        ax.set_ylim(new_ymin, new_ymax, emit=False)
+        update_zone_labels()
+        fig.canvas.draw_idle()
 
     fig.canvas.mpl_connect("button_press_event", on_click)
     fig.canvas.mpl_connect("scroll_event", on_scroll)
