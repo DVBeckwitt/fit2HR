@@ -15,7 +15,6 @@ import copy
 from datetime import datetime
 from typing import Optional, Tuple, List, Dict, Any
 import subprocess
-import time
 import bisect
 import statistics as stats
 import tkinter as tk
@@ -1021,46 +1020,20 @@ def plot_interactive(
     )
     annot.set_visible(False)
 
+    hover_texts = [
+        f"{m:.2f} min\n{h:.0f} ± {s:.1f} bpm"
+        for m, h, s in zip(minutes_arr, smoothed, sigma)
+    ]
+
     def update_annotation(idx):
         x = minutes_arr[idx]
         y = smoothed[idx]
-        s = sigma[idx]
         vline.set_xdata([x, x])
         annot.xy = (x, y)
-        annot.set_text(f"{x:.2f} min\n{y:.0f} ± {s:.1f} bpm")
+        annot.set_text(hover_texts[idx])
         annot.set_visible(True)
 
     last_hover_idx: Optional[int] = None
-    last_hover_draw = 0.0
-    hover_min_interval = 1.0 / 60.0
-
-    def on_move(event):
-        nonlocal last_hover_idx, last_hover_draw
-        if event.inaxes is not ax:
-            if annot.get_visible():
-                annot.set_visible(False)
-                fig.canvas.draw_idle()
-            last_hover_idx = None
-            return
-
-        x = event.xdata
-        if x is None:
-            return
-
-        idx = find_nearest_index(x, minutes_arr)
-        if last_hover_idx == idx and annot.get_visible():
-            return
-
-        now = time.perf_counter()
-        if now - last_hover_draw < hover_min_interval:
-            return
-
-        last_hover_idx = idx
-        last_hover_draw = now
-        update_annotation(idx)
-        fig.canvas.draw_idle()
-
-    fig.canvas.mpl_connect("motion_notify_event", on_move)
 
     # Left drag zoom (rectangle)
     def on_select(eclick, erelease):
@@ -1449,48 +1422,41 @@ def plot_interactive(
         fig_y = min(max(fig_y + 0.01, 0.0), 0.98)
         tooltip.set_position((fig_x, fig_y))
 
-    def show_tooltip(ax_obj, event):
-        message = tooltip_texts.get(ax_obj)
-        if message is None:
-            return
-        if event.x is None or event.y is None:
-            return
-        update_tooltip_position(event)
-        tooltip.set_text(message)
-        tooltip.set_visible(True)
-
     def on_motion(event):
-        nonlocal active_tip_ax
-        ax_under = event.inaxes
-        if ax_under in tooltip_texts:
-            if event.x is None or event.y is None:
-                return
-            active_tip_ax = ax_under
-            show_tooltip(ax_under, event)
-            fig.canvas.draw_idle()
-        elif active_tip_ax is not None:
-            tooltip.set_visible(False)
-            active_tip_ax = None
-            fig.canvas.draw_idle()
+        nonlocal active_tip_ax, last_hover_idx
 
-    def on_axes_enter(event):
-        nonlocal active_tip_ax
+        changed = False
+
+        # Hover over main plot
+        if event.inaxes is ax and event.xdata is not None:
+            idx = find_nearest_index(event.xdata, minutes_arr)
+            if idx != last_hover_idx or not annot.get_visible():
+                last_hover_idx = idx
+                update_annotation(idx)
+                changed = True
+        else:
+            if annot.get_visible():
+                annot.set_visible(False)
+                changed = True
+            last_hover_idx = None
+
+        # Tooltip handling for controls
         ax_under = event.inaxes
         if ax_under in tooltip_texts and event.x is not None and event.y is not None:
             active_tip_ax = ax_under
-            show_tooltip(ax_under, event)
-            fig.canvas.draw_idle()
-
-    def on_axes_leave(event):
-        nonlocal active_tip_ax
-        if active_tip_ax is not None:
+            update_tooltip_position(event)
+            tooltip.set_text(tooltip_texts[ax_under])
+            changed = True
+            tooltip.set_visible(True)
+        elif active_tip_ax is not None:
             tooltip.set_visible(False)
             active_tip_ax = None
+            changed = True
+
+        if changed:
             fig.canvas.draw_idle()
 
     fig.canvas.mpl_connect("motion_notify_event", on_motion)
-    fig.canvas.mpl_connect("axes_enter_event", on_axes_enter)
-    fig.canvas.mpl_connect("axes_leave_event", on_axes_leave)
 
     plt.show()
 
