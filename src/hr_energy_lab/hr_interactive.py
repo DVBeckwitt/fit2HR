@@ -693,8 +693,10 @@ def plot_interactive(
     y_margin = 0.05 * max(1.0, y_full_max - y_full_min)
 
     fig = plt.figure(figsize=(10, 6), constrained_layout=True)
+    fig.patch.set_facecolor("#f7f9fc")
     gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[3, 1.2])
     ax = fig.add_subplot(gs[0])
+    ax.set_facecolor("#f3f6fb")
     controls_ax = fig.add_subplot(gs[1])
     controls_ax.axis("off")
 
@@ -749,9 +751,32 @@ def plot_interactive(
     draw_zone_bands(zones_current)
 
     # Data
-    ax.plot(minutes, hr_vals, alpha=0.3, linewidth=1.0, label="Raw HR", zorder=2)
-    ax.plot(minutes, smoothed_hr, linewidth=1.5, label="Smoothed HR", zorder=3)
-    ax.fill_between(minutes, lower, upper, alpha=0.2, label="±1σ (local)", zorder=1)
+    ax.plot(
+        minutes,
+        hr_vals,
+        alpha=0.35,
+        linewidth=1.0,
+        label="Raw HR",
+        zorder=2,
+        color="#2b8cbe",
+    )
+    ax.plot(
+        minutes,
+        smoothed_hr,
+        linewidth=1.8,
+        label="Smoothed HR",
+        zorder=3,
+        color="#fb6a4a",
+    )
+    ax.fill_between(
+        minutes,
+        lower,
+        upper,
+        alpha=0.22,
+        label="±1σ (local)",
+        zorder=1,
+        color="#9ecae1",
+    )
 
     ax.set_xlabel("Minutes from start")
     ax.set_ylabel("Heart rate [bpm]")
@@ -762,6 +787,10 @@ def plot_interactive(
 
     handles, labels = ax.get_legend_handles_labels()
     ax.legend(handles, labels, loc="best")
+
+    # Enable mirrored ticks on right-hand side for easier readings
+    ax.yaxis.set_ticks_position("both")
+    ax.tick_params(axis="y", labelright=True, right=True)
 
     # Stats box (fixed in axes coords)
     def build_stats_lines(kcal_val, kcal_sigma_val):
@@ -939,6 +968,13 @@ def plot_interactive(
         interactive=False,
     )
 
+    def clamp_to_full_range(xmin, xmax, ymin, ymax):
+        new_xmin = max(x_full_min, xmin)
+        new_xmax = min(x_full_max, xmax)
+        new_ymin = max(y_full_min - y_margin, ymin)
+        new_ymax = min(y_full_max + y_margin, ymax)
+        return new_xmin, new_xmax, new_ymin, new_ymax
+
     # Double-click in, right-click out (factor 2)
     def on_click(event):
         if event.inaxes is not ax:
@@ -953,10 +989,12 @@ def plot_interactive(
             span_x = (cur_xmax - cur_xmin) * 0.5
             span_y = (cur_ymax - cur_ymin) * 0.5
 
-            new_xmin = max(x_full_min, x_center - span_x / 2)
-            new_xmax = min(x_full_max, x_center + span_x / 2)
-            new_ymin = max(y_full_min - y_margin, y_center - span_y / 2)
-            new_ymax = min(y_full_max + y_margin, y_center + span_y / 2)
+            new_xmin, new_xmax, new_ymin, new_ymax = clamp_to_full_range(
+                x_center - span_x / 2,
+                x_center + span_x / 2,
+                y_center - span_y / 2,
+                y_center + span_y / 2,
+            )
 
             ax.set_xlim(new_xmin, new_xmax)
             ax.set_ylim(new_ymin, new_ymax)
@@ -972,16 +1010,44 @@ def plot_interactive(
             span_x = (cur_xmax - cur_xmin) * 2.0
             span_y = (cur_ymax - cur_ymin) * 2.0
 
-            new_xmin = max(x_full_min, x_center - span_x / 2)
-            new_xmax = min(x_full_max, x_center + span_x / 2)
-            new_ymin = max(y_full_min - y_margin, y_center - span_y / 2)
-            new_ymax = min(y_full_max + y_margin, y_center + span_y / 2)
+            new_xmin, new_xmax, new_ymin, new_ymax = clamp_to_full_range(
+                x_center - span_x / 2,
+                x_center + span_x / 2,
+                y_center - span_y / 2,
+                y_center + span_y / 2,
+            )
 
             ax.set_xlim(new_xmin, new_xmax)
             ax.set_ylim(new_ymin, new_ymax)
             update_zone_labels()
 
+    def on_scroll(event):
+        if event.inaxes is not ax:
+            return
+
+        # Scroll up zooms in, down zooms out
+        scale = 0.8 if event.step > 0 else 1.25
+        cur_xmin, cur_xmax = ax.get_xlim()
+        cur_ymin, cur_ymax = ax.get_ylim()
+        x_center = event.xdata if event.xdata is not None else 0.5 * (cur_xmin + cur_xmax)
+        y_center = event.ydata if event.ydata is not None else 0.5 * (cur_ymin + cur_ymax)
+
+        span_x = (cur_xmax - cur_xmin) * scale
+        span_y = (cur_ymax - cur_ymin) * scale
+
+        new_xmin, new_xmax, new_ymin, new_ymax = clamp_to_full_range(
+            x_center - span_x / 2,
+            x_center + span_x / 2,
+            y_center - span_y / 2,
+            y_center + span_y / 2,
+        )
+
+        ax.set_xlim(new_xmin, new_xmax)
+        ax.set_ylim(new_ymin, new_ymax)
+        update_zone_labels()
+
     fig.canvas.mpl_connect("button_press_event", on_click)
+    fig.canvas.mpl_connect("scroll_event", on_scroll)
 
     # Also update zone labels if toolbar zoom/pan changes limits
     ax.callbacks.connect("ylim_changed", lambda ax: update_zone_labels())
