@@ -512,6 +512,17 @@ def save_profile_to_yaml(
 # Calories with strict linear error propagation from 1σ HR + device floor
 # ---------------------------------------------------------------------
 
+def compute_sedentary_tdee_kcal_per_min(
+    sex: str, age: int, weight_kg: float, height_cm: Optional[float]
+) -> Optional[float]:
+    if height_cm is None:
+        return None
+    s = -161 if sex.upper() == "F" else 5
+    bmr = 10.0 * weight_kg + 6.25 * float(height_cm) - 5.0 * age + s
+    tdee = 1.2 * bmr
+    return tdee / 1440.0
+
+
 def estimate_calories_kcal_strict(
     minutes,
     hr_mean,
@@ -520,6 +531,9 @@ def estimate_calories_kcal_strict(
     age: int,
     weight_kg: float,
     hr_error_bpm: float,
+    baseline_kcal_per_min: Optional[float] = None,
+    baseline_label: Optional[str] = None,
+    hr_rest: Optional[float] = None,
     model_frac: float = 0.2,
     include_model_uncertainty: bool = True,
 ) -> Tuple[float, float]:
@@ -552,29 +566,44 @@ def estimate_calories_kcal_strict(
     # Effective per-point 1σ at each midpoint: local noise ⊕ device floor
     sigma_mid_eff = np.sqrt(sigma_mid_local**2 + float(hr_error_bpm) ** 2)
 
-    # HR → kcal/min mapping and its derivative wrt HR
-    if sex.upper() == "F":
-        rate = (
-            -20.4022
-            + 0.4472 * hr_mid
-            - 0.1263 * weight_kg
-            + 0.074 * age
-        ) / 4.184
-        c = 0.4472 / 4.184  # d(rate)/d(HR) in kcal·min⁻¹·bpm⁻¹
+    def calories_rate_from_hr(hr_vals):
+        hr_vals = np.asarray(hr_vals, float)
+        if sex.upper() == "F":
+            rate_vals = (
+                -20.4022
+                + 0.4472 * hr_vals
+                - 0.1263 * weight_kg
+                + 0.074 * age
+            ) / 4.184
+            deriv = 0.4472 / 4.184  # d(rate)/d(HR) in kcal·min⁻¹·bpm⁻¹
+        else:
+            rate_vals = (
+                -55.0969
+                + 0.6309 * hr_vals
+                + 0.1988 * weight_kg
+                + 0.2017 * age
+            ) / 4.184
+            deriv = 0.6309 / 4.184
+        rate_vals = np.clip(rate_vals, 0.0, None)
+        return rate_vals, deriv
+
+    rate, c = calories_rate_from_hr(hr_mid)
+
+    if baseline_kcal_per_min is not None:
+        baseline_rate_val = float(baseline_kcal_per_min)
+        baseline_source = baseline_label or "baseline"
     else:
-        rate = (
-            -55.0969
-            + 0.6309 * hr_mid
-            + 0.1988 * weight_kg
-            + 0.2017 * age
-        ) / 4.184
-        c = 0.6309 / 4.184
+        rest_hr = hr_rest
+        baseline_source = "rest HR (profile)"
+        if rest_hr is None:
+            rest_hr = float(np.min(hr_mid))
+            baseline_source = "rest HR (min)"
+        rest_rate, _ = calories_rate_from_hr(rest_hr)
+        baseline_rate_val = float(np.asarray(rest_rate).item())
 
-    # Clip negative rates to zero
-    rate = np.clip(rate, 0.0, None)
-
-    # Baseline calories from HR trace
-    baseline_kcal = float(np.sum(rate * dts_min))
+    # Net calories above baseline burn
+    net_rate = np.clip(rate - baseline_rate_val, 0.0, None)
+    baseline_kcal = float(np.sum(net_rate * dts_min))
 
     # Strict propagated HR-trace uncertainty σ_HR
     var_E_hr = float(np.sum((c * dts_min * sigma_mid_eff) ** 2))
@@ -591,16 +620,17 @@ def estimate_calories_kcal_strict(
 
     if sigma_E_model > 0:
         print(
-            "Calories (HR + model uncertainty): "
+            "Net calories above baseline (HR + model uncertainty): "
             f"E = {baseline_kcal:.0f} ± {sigma_E_total:.0f} kcal "
             f"(σ_HR={sigma_E_hr:.0f}, σ_model={sigma_E_model:.0f}, "
-            f"hr_error_bpm={hr_error_bpm:.1f})"
+            f"hr_error_bpm={hr_error_bpm:.1f}, baseline={baseline_source})"
         )
     else:
         print(
-            "Calories (HR-trace uncertainty only): "
+            "Net calories above baseline (HR-trace uncertainty only): "
             f"E = {baseline_kcal:.0f} ± {sigma_E_total:.0f} kcal "
-            f"(σ_HR={sigma_E_hr:.0f}, hr_error_bpm={hr_error_bpm:.1f})"
+            f"(σ_HR={sigma_E_hr:.0f}, hr_error_bpm={hr_error_bpm:.1f}, "
+            f"baseline={baseline_source})"
         )
     return baseline_kcal, sigma_E_total
 
@@ -887,9 +917,11 @@ def plot_interactive(
 
         if kcal_val is not None:
             if kcal_sigma_val is not None and kcal_sigma_val > 0:
-                lines.append(f"Est. cals: {kcal_val:.0f} ± {kcal_sigma_val:.0f} kcal")
+                lines.append(
+                    f"Net cals (above baseline): {kcal_val:.0f} ± {kcal_sigma_val:.0f} kcal"
+                )
             else:
-                lines.append(f"Est. cals: {kcal_val:.0f} kcal")
+                lines.append(f"Net cals (above baseline): {kcal_val:.0f} kcal")
         return lines
 
     stats_text_artist = None
@@ -1319,6 +1351,13 @@ def plot_interactive(
             new_profile.get("hr_max"),
         )
         zone_stats_updated, _ = compute_zone_stats(minutes, smoothed, zones_updated)
+        baseline_kcal_per_min = compute_sedentary_tdee_kcal_per_min(
+            new_profile["sex"],
+            int(new_profile["age"]),
+            float(new_profile["weight_kg"]),
+            new_profile.get("height_cm"),
+        )
+        baseline_label = "sedentary TDEE" if baseline_kcal_per_min is not None else None
         kcal_estimate_updated, kcal_sigma_updated = estimate_calories_kcal_strict(
             minutes,
             smoothed,
@@ -1327,6 +1366,9 @@ def plot_interactive(
             int(new_profile["age"]),
             float(new_profile["weight_kg"]),
             float(new_profile["hr_error_bpm"]),
+            baseline_kcal_per_min=baseline_kcal_per_min,
+            baseline_label=baseline_label,
+            hr_rest=new_profile.get("hr_rest"),
             model_frac=float(new_profile.get("calories_model_frac", 0.2)),
             include_model_uncertainty=bool(
                 new_profile.get("calories_include_model_uncertainty", True)
@@ -1533,6 +1575,13 @@ def main():
 
     hr_stats = compute_hr_stats(hr_vals)
 
+    baseline_kcal_per_min = compute_sedentary_tdee_kcal_per_min(
+        profile["sex"],
+        profile["age"],
+        profile["weight_kg"],
+        profile.get("height_cm"),
+    )
+    baseline_label = "sedentary TDEE" if baseline_kcal_per_min is not None else None
     kcal_est, kcal_sigma = estimate_calories_kcal_strict(
         minutes,
         smoothed_hr,
@@ -1541,6 +1590,9 @@ def main():
         profile["age"],
         profile["weight_kg"],
         profile["hr_error_bpm"],
+        baseline_kcal_per_min=baseline_kcal_per_min,
+        baseline_label=baseline_label,
+        hr_rest=profile.get("hr_rest"),
         model_frac=profile.get("calories_model_frac", 0.2),
         include_model_uncertainty=profile.get(
             "calories_include_model_uncertainty", True
