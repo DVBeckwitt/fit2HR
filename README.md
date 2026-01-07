@@ -57,6 +57,15 @@ you also get a console command called `hr-energy-lab` that launches the interact
   \[
   t_i = Figure 1 shows the full interactive view with the smoothed HR trace, 1σ band, zone shading, and stats box.
 Figure 2 highlights the profile panel fields, Apply/Reset controls, and how edits update the plot and calorie summary.
+### Calories burned report
+
+The calories report summarizes **net calories above baseline** using the smoothed HR trace:
+
+* **HR ➜ kcal/min model:** sex-specific linear equations (same coefficients as the code) convert midpoint HR to kcal/min, with rates clipped at zero.
+* **Baseline subtraction:** if `height_cm` is available, the baseline is a sedentary TDEE rate (Mifflin-St Jeor × 1.2, per minute). Otherwise it falls back to a rest-HR baseline, using `hr_rest` from the profile or the minimum observed HR.
+* **Net calories:** the tool integrates the per-minute rate above baseline across the workout.
+* **Uncertainty:** HR noise is propagated point-by-point using the local smoothing sigma plus the device error floor (`hr_error_bpm`). If enabled, the report adds a fractional model error (`calories.model_frac`) in quadrature, yielding the final 1σ value shown as “±”.
+
 ![Figure 3: Zoomed zone labels and hover details.](docs/fig3_zoom_zones.png)
 Add a screenshot similar to:
 
